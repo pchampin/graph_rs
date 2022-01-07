@@ -11,6 +11,45 @@
 //! and to get mutable references to neighbouring Nodes and Arcs,
 //! but they *do not* allow to change the structure of the graph
 //! (as this would impact other nodes or arcs).
+//! 
+//! ```
+//! # use graph::*;
+//! 
+//! let mut g = Graph::<i32, ()>::new();
+//! // create nodes
+//! let h_r = g.new_node(); // default value is O
+//! let h_n1 = g.new_node();
+//! let h_n2 = g.new_node();
+//! let h_n11 = g.new_node();
+//! let h_n12 = g.new_node();
+//! let h_n21 = g.new_node();
+//! let h_n22 = g.new_node();
+//! // create arcs
+//! g.new_arc(&h_n1, &h_r);
+//! g.new_arc(&h_n2, &h_r);
+//! g.new_arc(&h_n11, &h_n1);
+//! g.new_arc(&h_n12, &h_n1);
+//! g.new_arc(&h_n21, &h_n2);
+//! g.new_arc(&h_n22, &h_n2);
+//! 
+//! fn inc_descendants(n: &mut Node<i32, ()>) {
+//!     *n.data_mut() += 1;
+//!     for out in n.out_arcs_mut() {
+//!         inc_descendants(out.dst_mut());
+//!     }
+//! }
+//! inc_descendants(g.node_mut(&h_n11).unwrap());
+//! inc_descendants(g.node_mut(&h_n22).unwrap());
+//! 
+//! let node_data = |nh| *g.node(nh).unwrap().data();
+//! assert_eq!(node_data(&h_r), 2);
+//! assert_eq!(node_data(&h_n1), 1);
+//! assert_eq!(node_data(&h_n11), 1);
+//! assert_eq!(node_data(&h_n12), 0);
+//! assert_eq!(node_data(&h_n2), 1);
+//! assert_eq!(node_data(&h_n21), 0);
+//! assert_eq!(node_data(&h_n22), 1);
+//! ```
 //!
 //! To change the structure of the graph,
 //! one must have a mutable reference to the graph itself,
@@ -28,6 +67,39 @@
 //! Finally, the structure of a graph can not be modified while browsing it.
 //! Structural changes can however be stored in a [`ChangeList`],
 //! which can later be [applied](Graph::apply) to the graph.
+//!
+//! ```
+//! // same graph as above
+//! # use graph::*;
+//! # let mut g = Graph::<i32, ()>::new();
+//! # // create nodes
+//! # let h_r = g.new_node(); // default value is O
+//! # let h_n1 = g.new_node();
+//! # let h_n2 = g.new_node();
+//! # let h_n11 = g.new_node();
+//! # let h_n12 = g.new_node();
+//! # let h_n21 = g.new_node();
+//! # let h_n22 = g.new_node();
+//! # // create arcs
+//! # g.new_arc(&h_n1, &h_r);
+//! # g.new_arc(&h_n2, &h_r);
+//! # g.new_arc(&h_n11, &h_n1);
+//! # g.new_arc(&h_n12, &h_n1);
+//! # g.new_arc(&h_n21, &h_n2);
+//! # g.new_arc(&h_n22, &h_n2);
+//! 
+//! // let's add a reverse arc for each arc in the graph
+//! let mut changes = ChangeList::new();
+//! for arc in g.nodes().flat_map(Node::out_arcs) {
+//!     changes.new_arc(
+//!         &arc.dst().handle(),
+//!         &arc.src().handle(),
+//!     );
+//! }
+//! g.apply(changes);
+//! 
+//! assert_eq!(12, g.nodes().flat_map(Node::out_arcs).count());
+//! ```
 #![deny(missing_docs)]
 
 use std::fmt;
