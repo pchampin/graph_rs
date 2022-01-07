@@ -19,7 +19,7 @@
 //! Handles can be obtained from Nodes and Arcs themselves,
 //! even through immutable references.
 //! They contain a pointer to the corresponding node or arcs,
-//! so they provide a almost-zero-cost abstraction.
+//! so they provide an almost-zero-cost abstraction.
 //! *Almost* zero, because two checks must still be performed:
 //! * whether the pointed element belongs to the graph to which they are passed, and
 //! * whether the pointed elements has been deleted.
@@ -518,6 +518,9 @@ impl<'a, T> PartialEq<&'a T> for Handle<T> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::just_underscores_and_digits)]
+    #![allow(clippy::zero_prefixed_literal)]
+
     use super::*;
 
     type TestGraph = Graph<usize, usize>;
@@ -887,10 +890,7 @@ mod tests {
 
         let mut n: Vec<_> = g.nodes().collect();
         n.sort_by_key(|n| n.data());
-        let a: Vec<_> = n
-            .iter()
-            .flat_map(|n| n.out_arcs().map(Arc::handle))
-            .collect();
+        let a = n.iter().flat_map(|n| n.out_arcs().map(Arc::handle));
 
         assert_eq!(n[0].data(), &1);
         assert_eq!(n[0].in_degree(), 0);
@@ -903,7 +903,7 @@ mod tests {
         assert_eq!(n[2].out_degree(), 0);
         assert_eq!(n.len(), 3);
 
-        assert_eq!(a.len(), 0);
+        assert_eq!(a.count(), 0);
     }
 
     #[test]
@@ -942,7 +942,7 @@ mod tests {
 
         let mut n: Vec<_> = g.nodes().collect();
         n.sort_by_key(|n| n.data());
-        let a: Vec<_> = n.iter().flat_map(|n| n.out_arcs()).collect();
+        let a = n.iter().flat_map(|n| n.out_arcs());
 
         assert_eq!(n[0].data(), &1);
         assert_eq!(n[0].in_degree(), 0);
@@ -955,7 +955,7 @@ mod tests {
         assert_eq!(n[2].out_degree(), 0);
         assert_eq!(n.len(), 3);
 
-        assert_eq!(a.len(), 0);
+        assert_eq!(a.count(), 0);
     }
 
     #[test]

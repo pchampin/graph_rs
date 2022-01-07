@@ -128,7 +128,7 @@ impl<N, A> ChangeList<N, A> {
                     ));
                 }
                 DeleteNode(prft) => {
-                    g.delete_node(&prft.handle(&new_nodes));
+                    g.delete_node(prft.handle(&new_nodes));
                 }
                 DeleteArc(prft) => {
                     if let Some(handle) = prft.try_handle(&new_arcs) {
