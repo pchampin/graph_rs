@@ -128,22 +128,22 @@ impl<N, A> ChangeList<N, A> {
                     ));
                 }
                 DeleteNode(prft) => {
-                    g.delete_node(prft.handle(&new_nodes));
+                    g.delete_node(prft.handle(&new_nodes)).unwrap();
                 }
                 DeleteArc(prft) => {
                     if let Some(handle) = prft.try_handle(&new_arcs) {
-                        g.delete_arc(handle)
+                        g.delete_arc(handle).unwrap();
                     }
                 }
                 MutateNode(prft, f) => {
-                    if let Some(node) = g.node_mut(prft.handle(&new_nodes)) {
+                    if let Ok(node) = g.node_mut(prft.handle(&new_nodes)) {
                         f(node.data_mut())
                     }
                 }
                 MutateArc(prft, f) => {
                     if let Some(arc) = prft
                         .try_handle(&new_arcs)
-                        .and_then(|handle| g.arc_mut(handle))
+                        .and_then(|handle| g.arc_mut(handle).ok())
                     {
                         f(arc.data_mut())
                     }
@@ -173,10 +173,10 @@ impl<T> PrFt<T> {
         }
     }
 
-    fn try_handle<'a>(&'a self, created: &'a [Option<T>]) -> Option<&'a T> {
+    fn try_handle<'a>(&'a self, created: &'a [Result<T>]) -> Option<&'a T> {
         match self {
             Present(handle) => Some(handle),
-            Future(i) => created[*i].as_ref(),
+            Future(i) => created[*i].as_ref().ok(),
         }
     }
 }

@@ -11,10 +11,11 @@
 //! and to get mutable references to neighbouring Nodes and Arcs,
 //! but they *do not* allow to change the structure of the graph
 //! (as this would impact other nodes or arcs).
-//! 
+//!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # use graph::*;
-//! 
+//!
 //! let mut g = Graph::<i32, ()>::new();
 //! // create nodes
 //! let h_r = g.new_node(); // default value is O
@@ -31,16 +32,16 @@
 //! g.new_arc(&h_n12, &h_n1);
 //! g.new_arc(&h_n21, &h_n2);
 //! g.new_arc(&h_n22, &h_n2);
-//! 
+//!
 //! fn inc_descendants(n: &mut Node<i32, ()>) {
 //!     *n.data_mut() += 1;
 //!     for out in n.out_arcs_mut() {
 //!         inc_descendants(out.dst_mut());
 //!     }
 //! }
-//! inc_descendants(g.node_mut(&h_n11).unwrap());
-//! inc_descendants(g.node_mut(&h_n22).unwrap());
-//! 
+//! inc_descendants(g.node_mut(&h_n11)?);
+//! inc_descendants(g.node_mut(&h_n22)?);
+//!
 //! let node_data = |nh| *g.node(nh).unwrap().data();
 //! assert_eq!(node_data(&h_r), 2);
 //! assert_eq!(node_data(&h_n1), 1);
@@ -49,6 +50,7 @@
 //! assert_eq!(node_data(&h_n2), 1);
 //! assert_eq!(node_data(&h_n21), 0);
 //! assert_eq!(node_data(&h_n22), 1);
+//! # Ok(()) }
 //! ```
 //!
 //! To change the structure of the graph,
@@ -87,7 +89,7 @@
 //! # g.new_arc(&h_n12, &h_n1);
 //! # g.new_arc(&h_n21, &h_n2);
 //! # g.new_arc(&h_n22, &h_n2);
-//! 
+//!
 //! // let's add a reverse arc for each arc in the graph
 //! let mut changes = ChangeList::new();
 //! for arc in g.nodes().flat_map(Node::out_arcs) {
@@ -97,7 +99,7 @@
 //!     );
 //! }
 //! g.apply(changes);
-//! 
+//!
 //! assert_eq!(12, g.nodes().flat_map(Node::out_arcs).count());
 //! ```
 #![deny(missing_docs)]
@@ -110,6 +112,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod changelist;
 pub use changelist::ChangeList;
+pub mod error;
+pub use error::{GraphError, Result};
 
 /// A graph whose nodes contain `N` data, and whose arcs contain `A` data.
 #[derive(Clone, Debug)]
@@ -186,45 +190,33 @@ impl<N, A> Graph<N, A> {
     /// This method may fail (return `None`) if:
     /// * the handle is not from this graph, or
     /// * the corresponding node has been deleted from the graph since the handle was issued.
-    pub fn node(&self, handle: &NodeHandle<N, A>) -> Option<&Node<N, A>> {
-        if self.check_node_handle(handle) {
-            Some(unsafe { &*handle.ptr.as_ptr() })
-        } else {
-            None
-        }
+    pub fn node(&self, handle: &NodeHandle<N, A>) -> Result<&Node<N, A>> {
+        self.check_node_handle(handle)?;
+        Ok(unsafe { &*handle.ptr.as_ptr() })
     }
 
     /// Return a mutable reference to the node corresponding to this handle.
     ///
     /// See [`node`](Graph::node) for situations where this method may fail (return `None`).
-    pub fn node_mut(&mut self, handle: &NodeHandle<N, A>) -> Option<&mut Node<N, A>> {
-        if self.check_node_handle(handle) {
-            Some(unsafe { &mut *handle.ptr.as_ptr() })
-        } else {
-            None
-        }
+    pub fn node_mut(&mut self, handle: &NodeHandle<N, A>) -> Result<&mut Node<N, A>> {
+        self.check_node_handle(handle)?;
+        Ok(unsafe { &mut *handle.ptr.as_ptr() })
     }
 
     /// Return a reference to the arc corresponding to this handle.
     ///
     /// See [`node`](Graph::node) for situations where this method may fail (return `None`).
-    pub fn arc(&self, handle: &ArcHandle<N, A>) -> Option<&Arc<N, A>> {
-        if self.check_arc_handle(handle) {
-            Some(unsafe { &*handle.ptr.as_ptr() })
-        } else {
-            None
-        }
+    pub fn arc(&self, handle: &ArcHandle<N, A>) -> Result<&Arc<N, A>> {
+        self.check_arc_handle(handle)?;
+        Ok(unsafe { &*handle.ptr.as_ptr() })
     }
 
     /// Return a mutable reference to the arc corresponding to this handle.
     ///
     /// See [`node`](Graph::node) for situations where this method may fail (return `None`).
-    pub fn arc_mut(&mut self, handle: &ArcHandle<N, A>) -> Option<&mut Arc<N, A>> {
-        if self.check_arc_handle(handle) {
-            Some(unsafe { &mut *handle.ptr.as_ptr() })
-        } else {
-            None
-        }
+    pub fn arc_mut(&mut self, handle: &ArcHandle<N, A>) -> Result<&mut Arc<N, A>> {
+        self.check_arc_handle(handle)?;
+        Ok(unsafe { &mut *handle.ptr.as_ptr() })
     }
 
     /// Create a new node in this graph, carrying the given data.
@@ -267,10 +259,9 @@ impl<N, A> Graph<N, A> {
         src: &NodeHandle<N, A>,
         dst: &NodeHandle<N, A>,
         data: A,
-    ) -> Option<ArcHandle<N, A>> {
-        if !self.check_node_handle(src) || !self.check_node_handle(dst) {
-            return None;
-        }
+    ) -> Result<ArcHandle<N, A>> {
+        self.check_node_handle(src)?;
+        self.check_node_handle(dst)?;
         let mut new = Box::new(Arc {
             src: src.ptr,
             dst: dst.ptr,
@@ -281,7 +272,7 @@ impl<N, A> Graph<N, A> {
         new.handle = sync::Arc::clone(&handle);
         unsafe { &mut *src.ptr.as_ptr() }.out_arcs.push(new);
         unsafe { &mut *dst.ptr.as_ptr() }.in_arcs.push(handle.ptr);
-        Some(handle)
+        Ok(handle)
     }
 
     /// Add a new arc from `src` to `dst`, carrying the default data.
@@ -293,37 +284,41 @@ impl<N, A> Graph<N, A> {
         &mut self,
         src: &NodeHandle<N, A>,
         dst: &NodeHandle<N, A>,
-    ) -> Option<ArcHandle<N, A>>
+    ) -> Result<ArcHandle<N, A>>
     where
         A: Default,
     {
         self.new_arc_with(src, dst, A::default())
     }
 
-    /// Delete the arc identified by this handle.
+    /// Delete the arc identified by this handle,
+    /// and return whether the arc was still present before deletion.
     ///
-    /// If the handle is not valid anymore (i.e. the arc was already deleted)
-    /// then it is simply ignored.
-    pub fn delete_arc(&mut self, handle: &ArcHandle<N, A>) {
+    /// If `handle` does not belong to this graph, an error is returned.
+    pub fn delete_arc(&mut self, handle: &ArcHandle<N, A>) -> Result<bool> {
         let arc = match self.arc_mut(handle) {
-            None => return, // this arc no longer exists
-            Some(arc) => arc,
+            Err(GraphError::DeadHandle) => return Ok(false),
+            Err(GraphError::WrongGraph) => return Err(GraphError::WrongGraph),
+            Ok(arc) => arc,
         };
         arc.dst_mut().remove_incoming_arc(handle.ptr);
         // the "outgoing version" of the arc must be removed last,
         // because this is what causes the arc to be freed
         arc.src_mut().remove_outgoing_arc(handle.ptr);
         arc.handle.kill();
+        Ok(true)
     }
 
-    /// Delete the node identified by this handle.
+    /// Delete the node identified by this handle,
+    /// with all its incoming and outgoing arcs,
+    /// and return whether the node was still present before deletion.
     ///
-    /// If the handle is not valid anymore (i.e. the node was already deleted)
-    /// then it is simply ignored.
-    pub fn delete_node(&mut self, handle: &NodeHandle<N, A>) {
+    /// If `handle` does not belong to this graph, an error is returned.
+    pub fn delete_node(&mut self, handle: &NodeHandle<N, A>) -> Result<bool> {
         let node = match self.node_mut(handle) {
-            None => return, // this node no longer exists
-            Some(node) => node,
+            Err(GraphError::DeadHandle) => return Ok(false),
+            Err(GraphError::WrongGraph) => return Err(GraphError::WrongGraph),
+            Ok(node) => node,
         };
         let mut in_arcs = vec![];
         std::mem::swap(&mut node.in_arcs, &mut in_arcs);
@@ -352,6 +347,7 @@ impl<N, A> Graph<N, A> {
             Some((i, _)) => self.nodes.swap_remove(i),
             None => unreachable!("to-be-deleted node could not be found in graph"),
         };
+        Ok(true)
     }
 
     /// Apply the given [`ChangeList`] to this graph.
@@ -364,14 +360,24 @@ impl<N, A> Graph<N, A> {
         changelist.apply_to(self)
     }
 
-    fn check_node_handle(&self, handle: &NodeHandle<N, A>) -> bool {
-        handle.alive.load(Ordering::SeqCst)
-            && unsafe { handle.ptr.as_ref() }.graph.as_ptr() as *const Self == self
+    fn check_node_handle(&self, handle: &NodeHandle<N, A>) -> Result<()> {
+        if !handle.alive.load(Ordering::SeqCst) {
+            Err(GraphError::DeadHandle)
+        } else if unsafe { handle.ptr.as_ref() }.graph.as_ptr() as *const Self != self {
+            Err(GraphError::WrongGraph)
+        } else {
+            Ok(())
+        }
     }
 
-    fn check_arc_handle(&self, handle: &ArcHandle<N, A>) -> bool {
-        handle.alive.load(Ordering::SeqCst)
-            && unsafe { handle.ptr.as_ref() }.src().graph.as_ptr() as *const Self == self
+    fn check_arc_handle(&self, handle: &ArcHandle<N, A>) -> Result<()> {
+        if !handle.alive.load(Ordering::SeqCst) {
+            Err(GraphError::DeadHandle)
+        } else if unsafe { handle.ptr.as_ref() }.src().graph.as_ptr() as *const Self != self {
+            Err(GraphError::WrongGraph)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -646,7 +652,7 @@ mod tests {
         let a13 = g.new_arc(&n1, &n3).unwrap();
         let a23 = g.new_arc(&n2, &n3).unwrap();
 
-        g.delete_node(&n2);
+        assert_eq!(g.delete_node(&n2), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 3);
@@ -654,63 +660,63 @@ mod tests {
         assert_eq!(g.node(&n0).unwrap().out_degree(), 1);
         assert_eq!(g.node(&n1).unwrap().in_degree(), 1);
         assert_eq!(g.node(&n1).unwrap().out_degree(), 1);
-        assert_eq!(g.node(&n2), None);
+        assert_eq!(g.node(&n2), Err(GraphError::DeadHandle));
         assert_eq!(g.node(&n3).unwrap().in_degree(), 1);
         assert_eq!(g.node(&n3).unwrap().out_degree(), 0);
         assert_eq!(g.arc(&a01).unwrap().src().handle(), n0);
         assert_eq!(g.arc(&a01).unwrap().dst().handle(), n1);
-        assert_eq!(g.arc(&a02), None);
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
         assert_eq!(g.arc(&a13).unwrap().src().handle(), n1);
         assert_eq!(g.arc(&a13).unwrap().dst().handle(), n3);
-        assert_eq!(g.arc(&a23), None);
+        assert_eq!(g.arc(&a23), Err(GraphError::DeadHandle));
 
-        g.delete_node(&n1);
+        assert_eq!(g.delete_node(&n1), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 2);
         assert_eq!(g.node(&n0).unwrap().in_degree(), 0);
         assert_eq!(g.node(&n0).unwrap().out_degree(), 0);
-        assert_eq!(g.node(&n1), None);
-        assert_eq!(g.node(&n2), None);
+        assert_eq!(g.node(&n1), Err(GraphError::DeadHandle));
+        assert_eq!(g.node(&n2), Err(GraphError::DeadHandle));
         assert_eq!(g.node(&n3).unwrap().in_degree(), 0);
         assert_eq!(g.node(&n3).unwrap().out_degree(), 0);
-        assert_eq!(g.arc(&a01), None);
-        assert_eq!(g.arc(&a02), None);
-        assert_eq!(g.arc(&a13), None);
-        assert_eq!(g.arc(&a23), None);
+        assert_eq!(g.arc(&a01), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a23), Err(GraphError::DeadHandle));
 
-        g.delete_node(&n3);
+        assert_eq!(g.delete_node(&n3), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 1);
         assert_eq!(g.node(&n0).unwrap().in_degree(), 0);
         assert_eq!(g.node(&n0).unwrap().out_degree(), 0);
-        assert_eq!(g.node(&n1), None);
-        assert_eq!(g.node(&n2), None);
-        assert_eq!(g.node(&n3), None);
-        assert_eq!(g.arc(&a01), None);
-        assert_eq!(g.arc(&a02), None);
-        assert_eq!(g.arc(&a13), None);
-        assert_eq!(g.arc(&a23), None);
+        assert_eq!(g.node(&n1), Err(GraphError::DeadHandle));
+        assert_eq!(g.node(&n2), Err(GraphError::DeadHandle));
+        assert_eq!(g.node(&n3), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a01), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a23), Err(GraphError::DeadHandle));
 
-        g.delete_node(&n0);
+        assert_eq!(g.delete_node(&n0), Ok(true));
 
         assert!(g.is_empty());
         assert_eq!(g.len(), 0);
-        assert_eq!(g.node(&n0), None);
-        assert_eq!(g.node(&n1), None);
-        assert_eq!(g.node(&n2), None);
-        assert_eq!(g.node(&n3), None);
-        assert_eq!(g.arc(&a01), None);
-        assert_eq!(g.arc(&a02), None);
-        assert_eq!(g.arc(&a13), None);
-        assert_eq!(g.arc(&a23), None);
+        assert_eq!(g.node(&n0), Err(GraphError::DeadHandle));
+        assert_eq!(g.node(&n1), Err(GraphError::DeadHandle));
+        assert_eq!(g.node(&n2), Err(GraphError::DeadHandle));
+        assert_eq!(g.node(&n3), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a01), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a23), Err(GraphError::DeadHandle));
 
         // nodes can be deleted twice
-        g.delete_node(&n0);
-        g.delete_node(&n1);
-        g.delete_node(&n2);
-        g.delete_node(&n3);
+        assert_eq!(g.delete_node(&n0), Ok(false));
+        assert_eq!(g.delete_node(&n1), Ok(false));
+        assert_eq!(g.delete_node(&n2), Ok(false));
+        assert_eq!(g.delete_node(&n3), Ok(false));
     }
 
     #[test]
@@ -725,7 +731,7 @@ mod tests {
         let a13 = g.new_arc(&n1, &n3).unwrap();
         let a23 = g.new_arc(&n2, &n3).unwrap();
 
-        g.delete_arc(&a13);
+        assert_eq!(g.delete_arc(&a13), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 4);
@@ -741,11 +747,11 @@ mod tests {
         assert_eq!(g.arc(&a01).unwrap().dst().handle(), n1);
         assert_eq!(g.arc(&a02).unwrap().src().handle(), n0);
         assert_eq!(g.arc(&a02).unwrap().dst().handle(), n2);
-        assert_eq!(g.arc(&a13), None);
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
         assert_eq!(g.arc(&a23).unwrap().src().handle(), n2);
         assert_eq!(g.arc(&a23).unwrap().dst().handle(), n3);
 
-        g.delete_arc(&a02);
+        assert_eq!(g.delete_arc(&a02), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 4);
@@ -759,12 +765,12 @@ mod tests {
         assert_eq!(g.node(&n3).unwrap().out_degree(), 0);
         assert_eq!(g.arc(&a01).unwrap().src().handle(), n0);
         assert_eq!(g.arc(&a01).unwrap().dst().handle(), n1);
-        assert_eq!(g.arc(&a02), None);
-        assert_eq!(g.arc(&a13), None);
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
         assert_eq!(g.arc(&a23).unwrap().src().handle(), n2);
         assert_eq!(g.arc(&a23).unwrap().dst().handle(), n3);
 
-        g.delete_arc(&a23);
+        assert_eq!(g.delete_arc(&a23), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 4);
@@ -778,11 +784,11 @@ mod tests {
         assert_eq!(g.node(&n3).unwrap().out_degree(), 0);
         assert_eq!(g.arc(&a01).unwrap().src().handle(), n0);
         assert_eq!(g.arc(&a01).unwrap().dst().handle(), n1);
-        assert_eq!(g.arc(&a02), None);
-        assert_eq!(g.arc(&a13), None);
-        assert_eq!(g.arc(&a23), None);
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a23), Err(GraphError::DeadHandle));
 
-        g.delete_arc(&a01);
+        assert_eq!(g.delete_arc(&a01), Ok(true));
 
         assert!(!g.is_empty());
         assert_eq!(g.len(), 4);
@@ -794,16 +800,16 @@ mod tests {
         assert_eq!(g.node(&n2).unwrap().out_degree(), 0);
         assert_eq!(g.node(&n3).unwrap().in_degree(), 0);
         assert_eq!(g.node(&n3).unwrap().out_degree(), 0);
-        assert_eq!(g.arc(&a01), None);
-        assert_eq!(g.arc(&a02), None);
-        assert_eq!(g.arc(&a13), None);
-        assert_eq!(g.arc(&a23), None);
+        assert_eq!(g.arc(&a01), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a02), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a13), Err(GraphError::DeadHandle));
+        assert_eq!(g.arc(&a23), Err(GraphError::DeadHandle));
 
         // arcs can be deleted twice
-        g.delete_arc(&a01);
-        g.delete_arc(&a02);
-        g.delete_arc(&a13);
-        g.delete_arc(&a23);
+        assert_eq!(g.delete_arc(&a01), Ok(false));
+        assert_eq!(g.delete_arc(&a02), Ok(false));
+        assert_eq!(g.delete_arc(&a13), Ok(false));
+        assert_eq!(g.delete_arc(&a23), Ok(false));
     }
 
     #[test]
@@ -815,16 +821,16 @@ mod tests {
         let n2 = g2.new_node();
         let a22 = g2.new_arc(&n2, &n2).unwrap();
 
-        assert!(g1.node(&n2).is_none());
-        assert!(g1.arc(&a22).is_none());
-        assert!(g2.node(&n1).is_none());
-        assert!(g2.arc(&a11).is_none());
-        assert!(g1.new_arc(&n1, &n2).is_none());
-        assert!(g1.new_arc(&n2, &n1).is_none());
-        assert!(g1.new_arc(&n2, &n2).is_none());
-        assert!(g2.new_arc(&n1, &n2).is_none());
-        assert!(g2.new_arc(&n2, &n1).is_none());
-        assert!(g2.new_arc(&n1, &n1).is_none());
+        assert_eq!(g1.node(&n2), Err(GraphError::WrongGraph));
+        assert_eq!(g1.arc(&a22), Err(GraphError::WrongGraph));
+        assert_eq!(g2.node(&n1), Err(GraphError::WrongGraph));
+        assert_eq!(g2.arc(&a11), Err(GraphError::WrongGraph));
+        assert_eq!(g1.new_arc(&n1, &n2), Err(GraphError::WrongGraph));
+        assert_eq!(g1.new_arc(&n2, &n1), Err(GraphError::WrongGraph));
+        assert_eq!(g1.new_arc(&n2, &n2), Err(GraphError::WrongGraph));
+        assert_eq!(g2.new_arc(&n1, &n2), Err(GraphError::WrongGraph));
+        assert_eq!(g2.new_arc(&n2, &n1), Err(GraphError::WrongGraph));
+        assert_eq!(g2.new_arc(&n1, &n1), Err(GraphError::WrongGraph));
     }
 
     #[test]
@@ -834,10 +840,10 @@ mod tests {
         let n2 = g.new_node();
         let _a12 = g.new_arc(&n1, &n2).unwrap();
 
-        g.delete_node(&n1);
-        g.delete_node(&n2);
-        assert!(g.new_arc(&n2, &n1).is_none());
-        assert!(g.new_arc(&n1, &n2).is_none());
+        assert_eq!(g.delete_node(&n1), Ok(true));
+        assert_eq!(g.delete_node(&n2), Ok(true));
+        assert_eq!(g.new_arc(&n2, &n1), Err(GraphError::DeadHandle));
+        assert_eq!(g.new_arc(&n1, &n2), Err(GraphError::DeadHandle));
     }
 
     #[test]
@@ -845,14 +851,14 @@ mod tests {
         let mut g = TestGraph::new();
         let n: Vec<_> = (0..7).map(|_| g.new_node()).collect();
         assert_eq!(g.len(), 7);
-        g.new_arc(&n[0], &n[1]);
-        g.new_arc(&n[0], &n[2]);
-        g.new_arc(&n[1], &n[3]);
-        g.new_arc(&n[2], &n[3]);
-        g.new_arc(&n[3], &n[4]);
-        g.new_arc(&n[3], &n[5]);
-        g.new_arc(&n[4], &n[6]);
-        g.new_arc(&n[5], &n[6]);
+        assert!(g.new_arc(&n[0], &n[1]).is_ok());
+        assert!(g.new_arc(&n[0], &n[2]).is_ok());
+        assert!(g.new_arc(&n[1], &n[3]).is_ok());
+        assert!(g.new_arc(&n[2], &n[3]).is_ok());
+        assert!(g.new_arc(&n[3], &n[4]).is_ok());
+        assert!(g.new_arc(&n[3], &n[5]).is_ok());
+        assert!(g.new_arc(&n[4], &n[6]).is_ok());
+        assert!(g.new_arc(&n[5], &n[6]).is_ok());
 
         fn inc_node(n: &mut Node<usize, usize>) {
             *n.data_mut() += 1;
@@ -986,8 +992,8 @@ mod tests {
         let n2 = g.new_node_with(2);
         let _01 = g.new_arc_with(&n0, &n1, 01).unwrap();
         let a12 = g.new_arc_with(&n1, &n2, 12).unwrap();
-        g.delete_node(&n0);
-        g.delete_arc(&a12);
+        assert_eq!(g.delete_node(&n0), Ok(true));
+        assert_eq!(g.delete_arc(&a12), Ok(true));
 
         let mut cl = ChangeList::new();
         let n3 = cl.new_node_with(3);
@@ -1036,7 +1042,7 @@ mod tests {
         let n: Vec<_> = (0..8).map(|i| g.new_node_with(i)).collect();
         assert_eq!(g.len(), 8);
         for i in 0..8 {
-            g.new_arc(&n[i], &n[i % 8]);
+            assert!(g.new_arc(&n[i], &n[i % 8]).is_ok());
         }
 
         let mut cl = ChangeList::new();
